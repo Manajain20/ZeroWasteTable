@@ -1,0 +1,89 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f7f5ef;
+  color: #19352f;
+}
+
+main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 48px 24px;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #19775d;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: 32px;
+  line-height: 1.15;
+}
+
+.lede,
+.note,
+p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #4a5c55;
+}
+
+.note {
+  margin-top: 20px;
+}
+
+.role-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.role-card {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 18px 16px;
+  text-align: left;
+  border: 1px solid #d8ded7;
+  border-radius: 16px;
+  background: #fffdf8;
+  color: inherit;
+  cursor: pointer;
+}
+
+.role-card:hover {
+  border-color: #19775d;
+}
+
+.role-card strong {
+  font-size: 18px;
+  color: #19352f;
+}
+
+.role-card span {
+  font-size: 14px;
+  line-height: 1.45;
+  color: #4a5c55;
+}
+
+.back {
+  margin-top: 24px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: #19775d;
+  color: #fffdf8;
+  font-size: 15px;
+  cursor: pointer;
+}
