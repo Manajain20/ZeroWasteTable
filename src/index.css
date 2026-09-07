@@ -107,14 +107,19 @@ h2 {
 }
 
 .item-card {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: grid;
   gap: 12px;
   padding: 14px 16px;
   border: 1px solid #d8ded7;
   border-radius: 16px;
   background: #fffdf8;
+}
+
+.item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .item-card div {
@@ -188,4 +193,42 @@ input {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.action-row .back,
+.action-row .secondary {
+  margin-top: 0;
+}
+
+.secondary {
+  margin-top: 24px;
+  padding: 10px 16px;
+  border: 1px solid #d8ded7;
+  border-radius: 12px;
+  background: #e7eee9;
+  color: #265044;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.text-btn {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #19775d;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+s {
+  color: #6b7c73;
 }
