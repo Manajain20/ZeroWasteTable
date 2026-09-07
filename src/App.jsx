@@ -99,9 +99,9 @@ export default function App() {
         />
       ) : null}
 
-      {role === 'buyer' ? <BuyerList listings={listings} /> : null}
+      {role === 'buyer' ? <BuyerList listings={listings} setListings={setListings} /> : null}
 
-      {role === 'ngo' ? <NgoList donations={donations} /> : null}
+      {role === 'ngo' ? <NgoList donations={donations} setDonations={setDonations} /> : null}
 
       <button className="back" type="button" onClick={() => setRole(null)}>
         Change role
@@ -161,6 +161,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         discountedPrice: Math.round(originalPrice * (1 - discountPercent / 100)),
         pickup: 'Today · 6:00–8:00 PM',
         payNote: 'Pay in person at pickup',
+        status: 'available',
       },
       ...listings,
     ])
@@ -178,6 +179,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         unit: actionItem.unit,
         readyBy: 'Today · 8:00 PM',
         intendedUse: 'Animal feed only',
+        status: 'available',
       },
       ...donations,
     ])
@@ -304,16 +306,27 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
   )
 }
 
-function BuyerList({ listings }) {
+function BuyerList({ listings, setListings }) {
+  const open = listings.filter((listing) => listing.status === 'available')
+  const reserved = listings.filter((listing) => listing.status === 'reserved')
+
+  function reserve(id) {
+    setListings(
+      listings.map((listing) =>
+        listing.id === id ? { ...listing, status: 'reserved' } : listing,
+      ),
+    )
+  }
+
   return (
     <section className="inventory">
       <h2>Discounted food nearby</h2>
-      <p className="lede">Pickup and pay in person. Reservations come next.</p>
-      {listings.length === 0 ? (
+      <p className="lede">Reserve it here, then pick up and pay in person.</p>
+      {open.length === 0 ? (
         <p className="note">Nothing listed yet. Switch to Restaurant and list an item.</p>
       ) : (
         <ul className="item-list">
-          {listings.map((listing) => (
+          {open.map((listing) => (
             <li key={listing.id} className="item-card">
               <div className="item-top">
                 <div>
@@ -328,6 +341,31 @@ function BuyerList({ listings }) {
                 </div>
                 <span className="tag tag-soon">{listing.payNote}</span>
               </div>
+              <button className="back" type="button" onClick={() => reserve(listing.id)}>
+                Reserve
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2 className="section-gap">My pickups</h2>
+      <p className="lede">Food you reserved. Pay when you collect it.</p>
+      {reserved.length === 0 ? (
+        <p className="note">No pickups yet. Reserve a listing above.</p>
+      ) : (
+        <ul className="item-list">
+          {reserved.map((listing) => (
+            <li key={listing.id} className="item-card">
+              <div className="item-top">
+                <div>
+                  <strong>{listing.name}</strong>
+                  <span>
+                    {listing.quantity} {listing.unit} · {listing.pickup}
+                  </span>
+                </div>
+                <span className="tag tag-ok">Reserved</span>
+              </div>
             </li>
           ))}
         </ul>
@@ -336,16 +374,27 @@ function BuyerList({ listings }) {
   )
 }
 
-function NgoList({ donations }) {
+function NgoList({ donations, setDonations }) {
+  const open = donations.filter((donation) => donation.status === 'available')
+  const claimed = donations.filter((donation) => donation.status === 'claimed')
+
+  function claim(id) {
+    setDonations(
+      donations.map((donation) =>
+        donation.id === id ? { ...donation, status: 'claimed' } : donation,
+      ),
+    )
+  }
+
   return (
     <section className="inventory">
       <h2>Donations for pickup</h2>
       <p className="lede">These batches are for animal feed, not human consumption.</p>
-      {donations.length === 0 ? (
+      {open.length === 0 ? (
         <p className="note">No donations yet. Switch to Restaurant and donate cooked food.</p>
       ) : (
         <ul className="item-list">
-          {donations.map((donation) => (
+          {open.map((donation) => (
             <li key={donation.id} className="item-card">
               <div className="item-top">
                 <div>
@@ -355,6 +404,31 @@ function NgoList({ donations }) {
                   </span>
                 </div>
                 <span className="tag tag-soon">{donation.intendedUse}</span>
+              </div>
+              <button className="back" type="button" onClick={() => claim(donation.id)}>
+                Claim pickup
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <h2 className="section-gap">My pickups</h2>
+      <p className="lede">Batches you claimed. Collect them in the ready window.</p>
+      {claimed.length === 0 ? (
+        <p className="note">No pickups yet. Claim a donation above.</p>
+      ) : (
+        <ul className="item-list">
+          {claimed.map((donation) => (
+            <li key={donation.id} className="item-card">
+              <div className="item-top">
+                <div>
+                  <strong>{donation.name}</strong>
+                  <span>
+                    {donation.quantity} {donation.unit} · {donation.readyBy}
+                  </span>
+                </div>
+                <span className="tag tag-ok">Claimed</span>
               </div>
             </li>
           ))}

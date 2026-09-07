@@ -232,3 +232,12 @@ input {
 s {
   color: #6b7c73;
 }
+
+.item-card .back {
+  margin-top: 0;
+  justify-self: start;
+}
+
+.section-gap {
+  margin-top: 32px;
+}
