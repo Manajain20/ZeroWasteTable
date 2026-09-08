@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const roles = [
   {
@@ -28,10 +28,10 @@ function dateFromToday(days) {
 }
 
 const startingItems = [
-  { id: '1', name: 'Baby spinach', quantity: 7, unit: 'kg', expiry: dateFromToday(1), status: 'in-stock', lastOrder: 12, avgWastePct: 0.25 },
-  { id: '2', name: 'Roma tomatoes', quantity: 18, unit: 'kg', expiry: dateFromToday(4), status: 'in-stock', lastOrder: 100, avgWastePct: 0.2 },
-  { id: '3', name: 'Brioche buns', quantity: 14, unit: 'pcs', expiry: dateFromToday(2), status: 'in-stock', lastOrder: 24, avgWastePct: 0.18 },
-  { id: '4', name: 'Cooked herb chicken', quantity: 9, unit: 'portions', expiry: dateFromToday(0), status: 'in-stock', lastOrder: 18, avgWastePct: 0.34 },
+  { id: '1', name: 'Baby spinach', quantity: 7, used: 5, shared: 0, ordered: 12, cost: 420, unit: 'kg', expiry: dateFromToday(1), status: 'in-stock', lastOrder: 12, avgWastePct: 0.25 },
+  { id: '2', name: 'Roma tomatoes', quantity: 18, used: 82, shared: 0, ordered: 100, cost: 1260, unit: 'kg', expiry: dateFromToday(4), status: 'in-stock', lastOrder: 100, avgWastePct: 0.2 },
+  { id: '3', name: 'Brioche buns', quantity: 14, used: 10, shared: 0, ordered: 24, cost: 960, unit: 'pcs', expiry: dateFromToday(2), status: 'in-stock', lastOrder: 24, avgWastePct: 0.18 },
+  { id: '4', name: 'Cooked herb chicken', quantity: 9, used: 9, shared: 0, ordered: 18, cost: 810, unit: 'portions', expiry: dateFromToday(0), status: 'in-stock', lastOrder: 18, avgWastePct: 0.34 },
 ]
 
 function daysLeft(expiry) {
@@ -52,16 +52,45 @@ function freshness(item) {
   return { label: `${days} days left`, tone: 'ok' }
 }
 
+function orderedQty(item) {
+  return item.ordered || item.lastOrder || 0
+}
+
+function thisCycleWaste(item) {
+  const ordered = orderedQty(item)
+  if (!ordered) return null
+  const unused = Math.max(0, ordered - (item.used || 0))
+  return unused / ordered
+}
+
+function wasteForSuggestion(item) {
+  const thisWaste = thisCycleWaste(item)
+  const hasLog = (item.used || 0) > 0 || (item.shared || 0) > 0
+  if (hasLog && thisWaste !== null) return thisWaste
+  if (item.avgWastePct) return item.avgWastePct
+  return null
+}
+
 function suggestedOrder(item) {
-  if (!item.lastOrder || !item.avgWastePct) return null
-  return Math.max(0, Math.round(item.lastOrder * (1 - item.avgWastePct + 0.05)))
+  const lastOrder = item.lastOrder || item.ordered
+  const waste = wasteForSuggestion(item)
+  if (!lastOrder || waste === null) return null
+  return Math.max(0, Math.round(lastOrder * (1 - waste + 0.05)))
 }
 
 function closeCycle(item) {
-  const lastOrder = item.lastOrder || item.quantity
-  const thisWaste = lastOrder ? item.quantity / lastOrder : 0
+  const thisWaste = thisCycleWaste(item) || 0
   const avgWastePct = item.avgWastePct ? (item.avgWastePct + thisWaste) / 2 : thisWaste
   return { ...item, avgWastePct, suggestionDecision: undefined }
+}
+
+function priceForAmount(item, amount) {
+  if (!item.ordered || !item.cost) return 0
+  return Math.round(item.cost * (amount / item.ordered))
+}
+
+function roundQty(value) {
+  return Number(Number(value).toFixed(2))
 }
 
 export default function App() {
@@ -164,22 +193,27 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
     quantity: '',
     unit: 'kg',
     expiry: '',
+    cost: '',
   })
   const [actionItem, setActionItem] = useState(null)
   const [shareQty, setShareQty] = useState('')
-  const [price, setPrice] = useState('400')
   const [discount, setDiscount] = useState('30')
 
   function addItem(event) {
     event.preventDefault()
     const quantity = Number(form.quantity)
-    if (!form.name.trim() || !quantity || !form.expiry) return
+    const cost = Number(form.cost)
+    if (!form.name.trim() || !quantity || !form.expiry || !cost) return
 
     setItems([
       {
         id: String(Date.now()),
         name: form.name.trim(),
         quantity,
+        used: 0,
+        shared: 0,
+        ordered: quantity,
+        cost,
         unit: form.unit.trim() || 'kg',
         expiry: form.expiry,
         status: 'in-stock',
@@ -188,19 +222,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
       },
       ...items,
     ])
-    setForm({ name: '', quantity: '', unit: 'kg', expiry: '' })
-  }
-
-  function markItem(id, status) {
-    setItems(
-      items.map((item) => {
-        if (item.id !== id) return item
-        if (status === 'listed' || status === 'donated') {
-          return { ...closeCycle(item), status }
-        }
-        return { ...item, status }
-      }),
-    )
+    setForm({ name: '', quantity: '', unit: 'kg', expiry: '', cost: '' })
   }
 
   function shareAmount() {
@@ -210,26 +232,66 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
     return Math.min(amount, actionItem.quantity)
   }
 
-  function takeFromKitchen(amount) {
-    const sendingAll = amount >= actionItem.quantity
-    setItems(
-      items.map((item) => {
+  function setUsedAndLeft(id, nextUsed, nextLeft) {
+    const currentItem = items.find((item) => item.id === id)
+    if (!currentItem || currentItem.status !== 'in-stock') return
+    const shared = currentItem.shared || 0
+    const max = roundQty((currentItem.ordered || 0) - shared)
+    const used = roundQty(Math.min(Math.max(nextUsed, 0), max))
+    const left = roundQty(Math.min(Math.max(nextLeft, 0), roundQty(max - used)))
+
+    setItems((current) =>
+      current.map((item) =>
+        item.id === id ? { ...item, used, quantity: left, suggestionDecision: undefined } : item,
+      ),
+    )
+    if (actionItem?.id === id) {
+      setActionItem({ ...actionItem, used, quantity: left })
+    }
+  }
+
+  function useInKitchen(id, delta) {
+    const item = items.find((entry) => entry.id === id)
+    if (!item) return
+    setUsedAndLeft(id, item.used + delta, item.quantity - delta)
+  }
+
+  function typeStock(id, field, raw) {
+    const item = items.find((entry) => entry.id === id)
+    if (!item) return
+    const shared = item.shared || 0
+    const max = roundQty((item.ordered || 0) - shared)
+    const value = Number(raw)
+    if (Number.isNaN(value) || value < 0) return
+    if (field === 'used') {
+      const used = Math.min(value, max)
+      setUsedAndLeft(id, used, max - used)
+      return
+    }
+    const left = Math.min(value, max)
+    setUsedAndLeft(id, max - left, left)
+  }
+
+  function shareFromKitchen(amount, statusIfEmpty) {
+    setItems((current) =>
+      current.map((item) => {
         if (item.id !== actionItem.id) return item
-        if (sendingAll) return item
-        return {
+        const sendingAll = amount >= item.quantity
+        const next = {
           ...item,
-          quantity: Number((item.quantity - amount).toFixed(2)),
-          status: 'in-stock',
+          quantity: sendingAll ? 0 : roundQty(item.quantity - amount),
+          shared: roundQty((item.shared || 0) + amount),
         }
+        if (sendingAll) return { ...closeCycle(next), status: statusIfEmpty }
+        return { ...next, status: 'in-stock' }
       }),
     )
-    return sendingAll
   }
 
   function listForBuyers() {
     if (!actionItem) return
     const amount = shareAmount()
-    const originalPrice = Number(price)
+    const originalPrice = priceForAmount(actionItem, amount)
     const discountPercent = Math.min(80, Math.max(5, Number(discount) || 30))
     if (!amount || !originalPrice) return
 
@@ -248,8 +310,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
       },
       ...listings,
     ])
-    const sendingAll = takeFromKitchen(amount)
-    if (sendingAll) markItem(actionItem.id, 'listed')
+    shareFromKitchen(amount, 'listed')
     setActionItem(null)
   }
 
@@ -270,8 +331,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
       },
       ...donations,
     ])
-    const sendingAll = takeFromKitchen(amount)
-    if (sendingAll) markItem(actionItem.id, 'donated')
+    shareFromKitchen(amount, 'donated')
     setActionItem(null)
   }
 
@@ -283,29 +343,90 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
       <ul className="item-list">
         {items.map((item) => {
           const status = freshness(item)
-          const canShare = item.status === 'in-stock'
+          const canAdjust = item.status === 'in-stock'
+          const canShare = canAdjust && item.quantity > 0
           return (
             <li key={item.id} className={`item-card tone-${status.tone}`}>
               <div className="item-top">
                 <div>
                   <strong>{item.name}</strong>
                   <span>
-                    {item.quantity} {item.unit} remaining
+                    Ordered {item.ordered} {item.unit} · ₹{item.cost}
                   </span>
                 </div>
                 <span className={`tag tag-${status.tone}`}>{status.label}</span>
               </div>
-              {canShare ? (
-                <button
-                  className="text-btn"
-                  type="button"
-                  onClick={() => {
-                    setActionItem(item)
-                    setShareQty(String(item.quantity))
-                  }}
-                >
-                  Sell or donate
-                </button>
+              <div className="stock-row">
+                <label>
+                  Used
+                  {canAdjust ? (
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={item.used}
+                      onChange={(event) => typeStock(item.id, 'used', event.target.value)}
+                    />
+                  ) : (
+                    <strong>
+                      {item.used} {item.unit}
+                    </strong>
+                  )}
+                </label>
+                <label>
+                  Left
+                  {canAdjust ? (
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={item.quantity}
+                      onChange={(event) => typeStock(item.id, 'left', event.target.value)}
+                    />
+                  ) : (
+                    <strong>
+                      {item.quantity} {item.unit}
+                    </strong>
+                  )}
+                </label>
+                <div>
+                  <em>Shared</em>
+                  <strong>
+                    {item.shared || 0} {item.unit}
+                  </strong>
+                </div>
+              </div>
+              {canAdjust ? (
+                <div className="action-row">
+                  <button
+                    className="qty-btn"
+                    type="button"
+                    onClick={() => useInKitchen(item.id, 1)}
+                    disabled={item.quantity < 1}
+                  >
+                    +1 used
+                  </button>
+                  <button
+                    className="qty-btn"
+                    type="button"
+                    onClick={() => useInKitchen(item.id, -1)}
+                    disabled={item.used < 1}
+                  >
+                    −1 used
+                  </button>
+                  {canShare ? (
+                    <button
+                      className="text-btn"
+                      type="button"
+                      onClick={() => {
+                        setActionItem(item)
+                        setShareQty(String(item.quantity))
+                      }}
+                    >
+                      Sell or donate
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </li>
           )
@@ -332,31 +453,26 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
             />
           </label>
           <p className="lede">
-            You keep{' '}
-            {Number((actionItem.quantity - shareAmount()).toFixed(2))} {actionItem.unit}{' '}
-            for your own use.
+            You keep {roundQty(actionItem.quantity - shareAmount())} {actionItem.unit}{' '}
+            for the kitchen. Full price for this amount: ₹
+            {priceForAmount(actionItem, shareAmount())} (from ₹{actionItem.cost} for{' '}
+            {actionItem.ordered} {actionItem.unit} ordered). Buyers pay ₹
+            {Math.round(
+              priceForAmount(actionItem, shareAmount()) *
+                (1 - Math.min(80, Math.max(5, Number(discount) || 30)) / 100),
+            )}{' '}
+            after the discount.
           </p>
-          <div className="form-row">
-            <label>
-              Price for this amount (₹)
-              <input
-                type="number"
-                min="1"
-                value={price}
-                onChange={(event) => setPrice(event.target.value)}
-              />
-            </label>
-            <label>
-              Buyer discount %
-              <input
-                type="number"
-                min="5"
-                max="80"
-                value={discount}
-                onChange={(event) => setDiscount(event.target.value)}
-              />
-            </label>
-          </div>
+          <label>
+            Buyer discount %
+            <input
+              type="number"
+              min="5"
+              max="80"
+              value={discount}
+              onChange={(event) => setDiscount(event.target.value)}
+            />
+          </label>
           <div className="action-row">
             <button className="back" type="button" onClick={listForBuyers}>
               List for buyers
@@ -383,7 +499,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         </label>
         <div className="form-row">
           <label>
-            Quantity
+            How much did you order?
             <input
               type="number"
               min="0"
@@ -402,14 +518,26 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
             />
           </label>
         </div>
-        <label>
-          Expiry date
-          <input
-            type="date"
-            value={form.expiry}
-            onChange={(event) => setForm({ ...form, expiry: event.target.value })}
-          />
-        </label>
+        <div className="form-row">
+          <label>
+            What you paid (₹)
+            <input
+              type="number"
+              min="1"
+              value={form.cost}
+              onChange={(event) => setForm({ ...form, cost: event.target.value })}
+              placeholder="420"
+            />
+          </label>
+          <label>
+            Expiry date
+            <input
+              type="date"
+              value={form.expiry}
+              onChange={(event) => setForm({ ...form, expiry: event.target.value })}
+            />
+          </label>
+        </div>
         <button className="back" type="submit">
           Save item
         </button>
@@ -435,15 +563,15 @@ function OrderSuggestions({ items, setItems }) {
     <div className="suggestions">
       <h2 className="section-gap">Next order suggestions</h2>
       <p className="lede">
-        Based on what you usually waste, plus a small safety buffer. The app never places
-        an order for you.
+        These numbers follow what you logged as used, left, and shared, plus a small
+        safety buffer. The app never places an order for you.
       </p>
       {pending.length === 0 ? (
         <p className="empty">No pending suggestions. Log a few cycles and they will show up here.</p>
       ) : (
         <ul className="item-list">
           {pending.map((item) => (
-            <SuggestionCard key={item.id} item={item} onDecide={decide} />
+            <SuggestionCard key={`${item.id}-${item.used}-${item.quantity}-${item.shared}`} item={item} onDecide={decide} />
           ))}
         </ul>
       )}
@@ -454,8 +582,13 @@ function OrderSuggestions({ items, setItems }) {
 function SuggestionCard({ item, onDecide }) {
   const amount = suggestedOrder(item)
   const [own, setOwn] = useState(String(amount))
-  const wastePct = Math.round(item.avgWastePct * 100)
-  const change = Math.round((1 - amount / item.lastOrder) * 100)
+  const lastOrder = item.lastOrder || item.ordered
+  const wastePct = Math.round((wasteForSuggestion(item) || 0) * 100)
+  const change = lastOrder ? Math.round((1 - amount / lastOrder) * 100) : 0
+
+  useEffect(() => {
+    setOwn(String(amount))
+  }, [amount])
 
   return (
     <li className="item-card insight">
@@ -463,10 +596,12 @@ function SuggestionCard({ item, onDecide }) {
         <div>
           <strong>{item.name}</strong>
           <span>
-            Last order {item.lastOrder} {item.unit} · about {wastePct}% wasted
+            Ordered {lastOrder} {item.unit} · used {item.used || 0} · left {item.quantity} ·
+            shared {item.shared || 0}
           </span>
           <span>
-            Suggested next order: {amount} {item.unit} ({change >= 0 ? '↓' : '↑'}
+            This cycle {wastePct}% unused. Suggested next order: {amount} {item.unit} (
+            {change >= 0 ? '↓' : '↑'}
             {Math.abs(change)}% vs last, with 5% buffer)
           </span>
         </div>
@@ -552,7 +687,8 @@ function BuyerList({ listings, setListings }) {
                 <div>
                   <strong>{listing.name}</strong>
                   <span>
-                    {listing.quantity} {listing.unit} · {listing.pickup}
+                    {listing.quantity} {listing.unit} · {listing.pickup} · pay ₹
+                    {listing.discountedPrice} in person
                   </span>
                 </div>
                 <span className="tag tag-ok">Reserved</span>
