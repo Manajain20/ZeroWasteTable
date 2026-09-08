@@ -19,6 +19,12 @@ const roles = [
     icon: '🐾',
     text: 'Claim donated cooked food and arrange a pickup.',
   },
+  {
+    id: 'compost',
+    title: 'Compost',
+    icon: '🌱',
+    text: 'Buy expired leftover cheap and turn it into manure.',
+  },
 ]
 
 function dateFromToday(days) {
@@ -93,11 +99,77 @@ function roundQty(value) {
   return Number(Number(value).toFixed(2))
 }
 
+function isExpired(expiry) {
+  return expiry ? daysLeft(expiry) < 0 : false
+}
+
+function priceSlice(fullPrice, fullQty, takeQty) {
+  if (!fullQty || !fullPrice) return 0
+  return Math.round(fullPrice * (takeQty / fullQty))
+}
+
+function manurePay(originalPrice) {
+  return Math.max(1, Math.round(originalPrice * 0.2))
+}
+
+function takeFromOffers(offers, id, amount, buildPickup) {
+  const offer = offers.find((entry) => entry.id === id)
+  if (!offer) return offers
+  const take = roundQty(Math.min(amount, offer.quantity))
+  if (!take) return offers
+  const left = roundQty(offer.quantity - take)
+  return [
+    buildPickup(offer, take),
+    ...offers.map((entry) =>
+      entry.id !== id
+        ? entry
+        : {
+            ...entry,
+            quantity: left,
+            originalPrice: priceSlice(entry.originalPrice, offer.quantity, left),
+            discountedPrice: priceSlice(entry.discountedPrice, offer.quantity, left),
+            status: left > 0 ? 'available' : 'gone',
+          },
+    ),
+  ]
+}
+
+const startingListings = [
+  {
+    id: 'expired-1',
+    name: 'Wilted mixed greens',
+    quantity: 4,
+    unit: 'kg',
+    originalPrice: 140,
+    discountPercent: 30,
+    discountedPrice: 98,
+    pickup: 'Today · 9:00–11:00 AM',
+    payNote: 'Pay in person at pickup',
+    status: 'available',
+    expiry: dateFromToday(-1),
+  },
+]
+
+const startingDonations = [
+  {
+    id: 'expired-d1',
+    name: 'Yesterday’s cooked rice',
+    quantity: 8,
+    unit: 'portions',
+    originalPrice: 240,
+    discountedPrice: 240,
+    readyBy: 'Today · 8:00 AM',
+    intendedUse: 'Animal feed only',
+    status: 'available',
+    expiry: dateFromToday(-2),
+  },
+]
+
 export default function App() {
   const [role, setRole] = useState(null)
   const [items, setItems] = useState(startingItems)
-  const [listings, setListings] = useState([])
-  const [donations, setDonations] = useState([])
+  const [listings, setListings] = useState(startingListings)
+  const [donations, setDonations] = useState(startingDonations)
 
   if (!role) {
     return (
@@ -113,7 +185,8 @@ export default function App() {
         </h1>
         <p className="lede">
           Restaurants rescue surplus. Neighbours grab a discount. NGOs collect cooked
-          batches for animal feed. Pick a seat at the table.
+          batches for animal feed. Whatever is still left after expiry can become manure.
+          Pick a seat at the table.
         </p>
         <ul className="highlights">
           <li>
@@ -127,6 +200,10 @@ export default function App() {
           <li>
             <strong>Order</strong>
             less next week
+          </li>
+          <li>
+            <strong>Compost</strong>
+            expired leftover
           </li>
         </ul>
         <div className="role-list">
@@ -166,7 +243,15 @@ export default function App() {
       </header>
 
       <p className="chip">{current.icon} {current.title}</p>
-      <h1>{current.title === 'Restaurant' ? 'What’s in the kitchen today?' : current.title === 'Buyer' ? 'Good food, better price.' : 'Food that still has a job.'}</h1>
+      <h1>
+        {role === 'restaurant'
+          ? 'What’s in the kitchen today?'
+          : role === 'buyer'
+            ? 'Good food, better price.'
+            : role === 'ngo'
+              ? 'Food that still has a job.'
+              : 'Expired leftover, still useful.'}
+      </h1>
       <p className="lede">{current.text}</p>
 
       {role === 'restaurant' ? (
@@ -183,6 +268,15 @@ export default function App() {
       {role === 'buyer' ? <BuyerList listings={listings} setListings={setListings} /> : null}
 
       {role === 'ngo' ? <NgoList donations={donations} setDonations={setDonations} /> : null}
+
+      {role === 'compost' ? (
+        <CompostList
+          listings={listings}
+          setListings={setListings}
+          donations={donations}
+          setDonations={setDonations}
+        />
+      ) : null}
     </main>
   )
 }
@@ -307,6 +401,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         pickup: 'Today · 6:00–8:00 PM',
         payNote: 'Pay in person at pickup',
         status: 'available',
+        expiry: actionItem.expiry,
       },
       ...listings,
     ])
@@ -325,9 +420,12 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         name: actionItem.name,
         quantity: amount,
         unit: actionItem.unit,
+        originalPrice: priceForAmount(actionItem, amount) || amount,
+        discountedPrice: priceForAmount(actionItem, amount) || amount,
         readyBy: 'Today · 8:00 PM',
         intendedUse: 'Animal feed only',
         status: 'available',
+        expiry: actionItem.expiry,
       },
       ...donations,
     ])
@@ -631,33 +729,77 @@ function SuggestionCard({ item, onDecide }) {
   )
 }
 
+function TakeAmount({ max, unit, actionLabel, priceFor, onTake }) {
+  const [qty, setQty] = useState(String(max))
+
+  useEffect(() => {
+    setQty(String(max))
+  }, [max])
+
+  const amount = Math.min(Number(qty) || 0, max)
+  const pay = priceFor && amount ? priceFor(amount) : null
+
+  return (
+    <>
+      <label>
+        How much do you want?
+        <input
+          type="number"
+          min="0.1"
+          step="0.1"
+          max={max}
+          value={qty}
+          onChange={(event) => setQty(event.target.value)}
+        />
+      </label>
+      <p className="lede">
+        {roundQty(max - amount)} {unit} stays for others.
+        {pay ? ` You pay ₹${pay} for ${amount} ${unit}.` : ''}
+      </p>
+      <button className="back" type="button" disabled={!amount} onClick={() => onTake(amount)}>
+        {actionLabel}
+      </button>
+    </>
+  )
+}
+
 function BuyerList({ listings, setListings }) {
-  const open = listings.filter((listing) => listing.status === 'available')
+  const open = listings.filter(
+    (listing) => listing.status === 'available' && listing.quantity > 0 && !isExpired(listing.expiry),
+  )
   const reserved = listings.filter((listing) => listing.status === 'reserved')
 
-  function reserve(id) {
+  function reserve(id, amount) {
     setListings(
-      listings.map((listing) =>
-        listing.id === id ? { ...listing, status: 'reserved' } : listing,
-      ),
+      takeFromOffers(listings, id, amount, (offer, take) => ({
+        ...offer,
+        id: String(Date.now()),
+        quantity: take,
+        originalPrice: priceSlice(offer.originalPrice, offer.quantity, take),
+        discountedPrice: priceSlice(offer.discountedPrice, offer.quantity, take),
+        status: 'reserved',
+      })),
     )
   }
 
   return (
     <section className="inventory">
       <h2>Discounted food nearby</h2>
-      <p className="lede">Reserve it here, then pick up and pay in person.</p>
+      <p className="lede">
+        Pick how much to reserve, then pick up and pay in person. Whatever is still
+        listed when it expires moves to Compost for manure.
+      </p>
       {open.length === 0 ? (
-        <p className="empty">Nothing listed yet. Switch to Restaurant and list an item.</p>
+        <p className="empty">Nothing fresh listed yet. Switch to Restaurant and list an item.</p>
       ) : (
         <ul className="item-list">
           {open.map((listing) => (
-            <li key={listing.id} className="item-card listing-card">
+            <li key={`${listing.id}-${listing.quantity}`} className="item-card listing-card">
               <div className="item-top">
                 <div>
                   <strong>{listing.name}</strong>
                   <span>
-                    {listing.quantity} {listing.unit} · {listing.pickup}
+                    {listing.quantity} {listing.unit} left · {listing.pickup}
                   </span>
                   <span className="price">
                     ₹{listing.discountedPrice}{' '}
@@ -667,9 +809,15 @@ function BuyerList({ listings, setListings }) {
                 </div>
                 <span className="tag tag-ok">{listing.payNote}</span>
               </div>
-              <button className="back" type="button" onClick={() => reserve(listing.id)}>
-                Reserve
-              </button>
+              <TakeAmount
+                max={listing.quantity}
+                unit={listing.unit}
+                actionLabel="Reserve"
+                priceFor={(amount) =>
+                  priceSlice(listing.discountedPrice, listing.quantity, amount)
+                }
+                onTake={(amount) => reserve(listing.id, amount)}
+              />
             </li>
           ))}
         </ul>
@@ -702,39 +850,52 @@ function BuyerList({ listings, setListings }) {
 }
 
 function NgoList({ donations, setDonations }) {
-  const open = donations.filter((donation) => donation.status === 'available')
+  const open = donations.filter(
+    (donation) => donation.status === 'available' && donation.quantity > 0 && !isExpired(donation.expiry),
+  )
   const claimed = donations.filter((donation) => donation.status === 'claimed')
 
-  function claim(id) {
+  function claim(id, amount) {
     setDonations(
-      donations.map((donation) =>
-        donation.id === id ? { ...donation, status: 'claimed' } : donation,
-      ),
+      takeFromOffers(donations, id, amount, (offer, take) => ({
+        ...offer,
+        id: String(Date.now()),
+        quantity: take,
+        originalPrice: priceSlice(offer.originalPrice, offer.quantity, take),
+        discountedPrice: priceSlice(offer.discountedPrice, offer.quantity, take),
+        status: 'claimed',
+      })),
     )
   }
 
   return (
     <section className="inventory">
       <h2>Donations for pickup</h2>
-      <p className="lede">These batches are for animal feed, not human consumption.</p>
+      <p className="lede">
+        These batches are for animal feed, not human consumption. Claim only what you
+        can collect. Unclaimed leftover moves to Compost after expiry.
+      </p>
       {open.length === 0 ? (
-        <p className="empty">No donations yet. Switch to Restaurant and donate cooked food.</p>
+        <p className="empty">No fresh donations yet. Switch to Restaurant and donate cooked food.</p>
       ) : (
         <ul className="item-list">
           {open.map((donation) => (
-            <li key={donation.id} className="item-card">
+            <li key={`${donation.id}-${donation.quantity}`} className="item-card">
               <div className="item-top">
                 <div>
                   <strong>{donation.name}</strong>
                   <span>
-                    {donation.quantity} {donation.unit} · ready {donation.readyBy}
+                    {donation.quantity} {donation.unit} left · ready {donation.readyBy}
                   </span>
                 </div>
                 <span className="tag tag-soon">{donation.intendedUse}</span>
               </div>
-              <button className="back" type="button" onClick={() => claim(donation.id)}>
-                Claim pickup
-              </button>
+              <TakeAmount
+                max={donation.quantity}
+                unit={donation.unit}
+                actionLabel="Claim pickup"
+                onTake={(amount) => claim(donation.id, amount)}
+              />
             </li>
           ))}
         </ul>
@@ -756,6 +917,124 @@ function NgoList({ donations, setDonations }) {
                   </span>
                 </div>
                 <span className="tag tag-ok">Claimed</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function CompostList({ listings, setListings, donations, setDonations }) {
+  const expiredListings = listings.filter(
+    (listing) => listing.status === 'available' && listing.quantity > 0 && isExpired(listing.expiry),
+  )
+  const expiredDonations = donations.filter(
+    (donation) => donation.status === 'available' && donation.quantity > 0 && isExpired(donation.expiry),
+  )
+  const pickups = [
+    ...listings.filter((listing) => listing.status === 'manure-reserved'),
+    ...donations.filter((donation) => donation.status === 'manure-reserved'),
+  ]
+
+  function manurePickup(offer, take) {
+    const originalPrice = priceSlice(offer.originalPrice, offer.quantity, take)
+    return {
+      ...offer,
+      id: String(Date.now()),
+      quantity: take,
+      originalPrice,
+      discountedPrice: manurePay(originalPrice),
+      discountPercent: 80,
+      pickup: offer.pickup || 'Today · 9:00–11:00 AM',
+      payNote: 'For manure only · pay in person',
+      intendedUse: 'Manure only',
+      status: 'manure-reserved',
+    }
+  }
+
+  function reserveListing(id, amount) {
+    setListings(takeFromOffers(listings, id, amount, manurePickup))
+  }
+
+  function reserveDonation(id, amount) {
+    setDonations(takeFromOffers(donations, id, amount, manurePickup))
+  }
+
+  const open = [
+    ...expiredListings.map((offer) => ({ offer, kind: 'listing' })),
+    ...expiredDonations.map((offer) => ({ offer, kind: 'donation' })),
+  ]
+
+  return (
+    <section className="inventory">
+      <h2>Expired leftover for manure</h2>
+      <p className="lede">
+        Food buyers and NGOs did not take before it expired. It is 80% off the original
+        price, for manure preparation only — not for eating.
+      </p>
+      {open.length === 0 ? (
+        <p className="empty">
+          Nothing expired yet. Leftover from buyer and NGO listings shows up here after
+          the expiry date.
+        </p>
+      ) : (
+        <ul className="item-list">
+          {open.map(({ offer, kind }) => {
+            const payAll = manurePay(offer.originalPrice)
+            return (
+              <li key={`${kind}-${offer.id}-${offer.quantity}`} className="item-card listing-card">
+                <div className="item-top">
+                  <div>
+                    <strong>{offer.name}</strong>
+                    <span>
+                      {offer.quantity} {offer.unit} left · expired
+                    </span>
+                    <span className="price">
+                      ₹{payAll}{' '}
+                      <s>₹{offer.originalPrice}</s>
+                      <span className="tag tag-soon">80% off</span>
+                    </span>
+                  </div>
+                  <span className="tag tag-urgent">Manure only</span>
+                </div>
+                <TakeAmount
+                  max={offer.quantity}
+                  unit={offer.unit}
+                  actionLabel="Reserve for manure"
+                  priceFor={(amount) =>
+                    manurePay(priceSlice(offer.originalPrice, offer.quantity, amount))
+                  }
+                  onTake={(amount) =>
+                    kind === 'listing'
+                      ? reserveListing(offer.id, amount)
+                      : reserveDonation(offer.id, amount)
+                  }
+                />
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <h2 className="section-gap">My pickups</h2>
+      <p className="lede">Expired leftover you reserved. Pay when you collect it.</p>
+      {pickups.length === 0 ? (
+        <p className="empty">No pickups yet. Reserve an expired batch above.</p>
+      ) : (
+        <ul className="item-list">
+          {pickups.map((item) => (
+            <li key={item.id} className="item-card">
+              <div className="item-top">
+                <div>
+                  <strong>{item.name}</strong>
+                  <span>
+                    {item.quantity} {item.unit} · {item.pickup || item.readyBy} · pay ₹
+                    {item.discountedPrice} in person
+                  </span>
+                </div>
+                <span className="tag tag-ok">Reserved · manure</span>
               </div>
             </li>
           ))}
