@@ -4,16 +4,19 @@ const roles = [
   {
     id: 'restaurant',
     title: 'Restaurant',
+    icon: '🍽️',
     text: 'Track stock, sell leftover food cheap, or donate cooked food.',
   },
   {
     id: 'buyer',
     title: 'Buyer',
+    icon: '🛍️',
     text: 'Find discounted food nearby, reserve it, and pick it up in person.',
   },
   {
     id: 'ngo',
     title: 'NGO',
+    icon: '🐾',
     text: 'Claim donated cooked food and arrange a pickup.',
   },
 ]
@@ -69,20 +72,45 @@ export default function App() {
 
   if (!role) {
     return (
-      <main>
-        <p className="eyebrow">ZeroWasteTable</p>
-        <h1>Keep leftover food from going to waste.</h1>
+      <main className="page welcome">
+        <div className="brand-row">
+          <span className="logo" aria-hidden="true">
+            🥗
+          </span>
+          <p className="eyebrow">ZeroWasteTable</p>
+        </div>
+        <h1>
+          Keep leftover food <em>on the table</em>, not in the bin.
+        </h1>
         <p className="lede">
-          Choose how you want to use the app. You can switch later.
+          Restaurants rescue surplus. Neighbours grab a discount. NGOs collect cooked
+          batches for animal feed. Pick a seat at the table.
         </p>
+        <ul className="highlights">
+          <li>
+            <strong>Sell</strong>
+            surplus cheap
+          </li>
+          <li>
+            <strong>Donate</strong>
+            cooked batches
+          </li>
+          <li>
+            <strong>Order</strong>
+            less next week
+          </li>
+        </ul>
         <div className="role-list">
           {roles.map((item) => (
             <button
               key={item.id}
-              className="role-card"
+              className={`role-card role-${item.id}`}
               type="button"
               onClick={() => setRole(item.id)}
             >
+              <span className="role-icon" aria-hidden="true">
+                {item.icon}
+              </span>
               <strong>{item.title}</strong>
               <span>{item.text}</span>
             </button>
@@ -95,9 +123,21 @@ export default function App() {
   const current = roles.find((item) => item.id === role)
 
   return (
-    <main>
-      <p className="eyebrow">ZeroWasteTable</p>
-      <h1>{current.title} dashboard</h1>
+    <main className={`page dash dash-${role}`}>
+      <header className="topbar">
+        <div className="brand-row">
+          <span className="logo" aria-hidden="true">
+            🥗
+          </span>
+          <p className="eyebrow">ZeroWasteTable</p>
+        </div>
+        <button className="ghost" type="button" onClick={() => setRole(null)}>
+          Change role
+        </button>
+      </header>
+
+      <p className="chip">{current.icon} {current.title}</p>
+      <h1>{current.title === 'Restaurant' ? 'What’s in the kitchen today?' : current.title === 'Buyer' ? 'Good food, better price.' : 'Food that still has a job.'}</h1>
       <p className="lede">{current.text}</p>
 
       {role === 'restaurant' ? (
@@ -114,10 +154,6 @@ export default function App() {
       {role === 'buyer' ? <BuyerList listings={listings} setListings={setListings} /> : null}
 
       {role === 'ngo' ? <NgoList donations={donations} setDonations={setDonations} /> : null}
-
-      <button className="back" type="button" onClick={() => setRole(null)}>
-        Change role
-      </button>
     </main>
   )
 }
@@ -130,6 +166,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
     expiry: '',
   })
   const [actionItem, setActionItem] = useState(null)
+  const [shareQty, setShareQty] = useState('')
   const [price, setPrice] = useState('400')
   const [discount, setDiscount] = useState('30')
 
@@ -166,17 +203,41 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
     )
   }
 
+  function shareAmount() {
+    if (!actionItem) return 0
+    const amount = Number(shareQty)
+    if (!amount || amount <= 0) return 0
+    return Math.min(amount, actionItem.quantity)
+  }
+
+  function takeFromKitchen(amount) {
+    const sendingAll = amount >= actionItem.quantity
+    setItems(
+      items.map((item) => {
+        if (item.id !== actionItem.id) return item
+        if (sendingAll) return item
+        return {
+          ...item,
+          quantity: Number((item.quantity - amount).toFixed(2)),
+          status: 'in-stock',
+        }
+      }),
+    )
+    return sendingAll
+  }
+
   function listForBuyers() {
     if (!actionItem) return
+    const amount = shareAmount()
     const originalPrice = Number(price)
     const discountPercent = Math.min(80, Math.max(5, Number(discount) || 30))
-    if (!originalPrice) return
+    if (!amount || !originalPrice) return
 
     setListings([
       {
         id: String(Date.now()),
         name: actionItem.name,
-        quantity: actionItem.quantity,
+        quantity: amount,
         unit: actionItem.unit,
         originalPrice,
         discountPercent,
@@ -187,17 +248,21 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
       },
       ...listings,
     ])
-    markItem(actionItem.id, 'listed')
+    const sendingAll = takeFromKitchen(amount)
+    if (sendingAll) markItem(actionItem.id, 'listed')
     setActionItem(null)
   }
 
   function donateToNgo() {
     if (!actionItem) return
+    const amount = shareAmount()
+    if (!amount) return
+
     setDonations([
       {
         id: String(Date.now()),
         name: actionItem.name,
-        quantity: actionItem.quantity,
+        quantity: amount,
         unit: actionItem.unit,
         readyBy: 'Today · 8:00 PM',
         intendedUse: 'Animal feed only',
@@ -205,7 +270,8 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
       },
       ...donations,
     ])
-    markItem(actionItem.id, 'donated')
+    const sendingAll = takeFromKitchen(amount)
+    if (sendingAll) markItem(actionItem.id, 'donated')
     setActionItem(null)
   }
 
@@ -219,7 +285,7 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
           const status = freshness(item)
           const canShare = item.status === 'in-stock'
           return (
-            <li key={item.id} className="item-card">
+            <li key={item.id} className={`item-card tone-${status.tone}`}>
               <div className="item-top">
                 <div>
                   <strong>{item.name}</strong>
@@ -230,7 +296,14 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
                 <span className={`tag tag-${status.tone}`}>{status.label}</span>
               </div>
               {canShare ? (
-                <button className="text-btn" type="button" onClick={() => setActionItem(item)}>
+                <button
+                  className="text-btn"
+                  type="button"
+                  onClick={() => {
+                    setActionItem(item)
+                    setShareQty(String(item.quantity))
+                  }}
+                >
                   Sell or donate
                 </button>
               ) : null}
@@ -245,12 +318,27 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         <div className="add-form">
           <h2>What should happen to {actionItem.name}?</h2>
           <p className="lede">
-            Safe leftover ingredients can be sold cheap to buyers. Already-cooked food
-            should go to an NGO, marked for animal feed.
+            Choose how much to share. Whatever you leave stays for the kitchen.
+          </p>
+          <label>
+            Amount to sell or donate
+            <input
+              type="number"
+              min="0.1"
+              step="0.1"
+              max={actionItem.quantity}
+              value={shareQty}
+              onChange={(event) => setShareQty(event.target.value)}
+            />
+          </label>
+          <p className="lede">
+            You keep{' '}
+            {Number((actionItem.quantity - shareAmount()).toFixed(2))} {actionItem.unit}{' '}
+            for your own use.
           </p>
           <div className="form-row">
             <label>
-              Original price (₹)
+              Price for this amount (₹)
               <input
                 type="number"
                 min="1"
@@ -351,7 +439,7 @@ function OrderSuggestions({ items, setItems }) {
         an order for you.
       </p>
       {pending.length === 0 ? (
-        <p className="note">No pending suggestions. Log a few cycles and they will show up here.</p>
+        <p className="empty">No pending suggestions. Log a few cycles and they will show up here.</p>
       ) : (
         <ul className="item-list">
           {pending.map((item) => (
@@ -425,23 +513,24 @@ function BuyerList({ listings, setListings }) {
       <h2>Discounted food nearby</h2>
       <p className="lede">Reserve it here, then pick up and pay in person.</p>
       {open.length === 0 ? (
-        <p className="note">Nothing listed yet. Switch to Restaurant and list an item.</p>
+        <p className="empty">Nothing listed yet. Switch to Restaurant and list an item.</p>
       ) : (
         <ul className="item-list">
           {open.map((listing) => (
-            <li key={listing.id} className="item-card">
+            <li key={listing.id} className="item-card listing-card">
               <div className="item-top">
                 <div>
                   <strong>{listing.name}</strong>
                   <span>
                     {listing.quantity} {listing.unit} · {listing.pickup}
                   </span>
-                  <span>
+                  <span className="price">
                     ₹{listing.discountedPrice}{' '}
-                    <s>₹{listing.originalPrice}</s> · {listing.discountPercent}% off
+                    <s>₹{listing.originalPrice}</s>
+                    <span className="tag tag-soon">{listing.discountPercent}% off</span>
                   </span>
                 </div>
-                <span className="tag tag-soon">{listing.payNote}</span>
+                <span className="tag tag-ok">{listing.payNote}</span>
               </div>
               <button className="back" type="button" onClick={() => reserve(listing.id)}>
                 Reserve
@@ -454,7 +543,7 @@ function BuyerList({ listings, setListings }) {
       <h2 className="section-gap">My pickups</h2>
       <p className="lede">Food you reserved. Pay when you collect it.</p>
       {reserved.length === 0 ? (
-        <p className="note">No pickups yet. Reserve a listing above.</p>
+        <p className="empty">No pickups yet. Reserve a listing above.</p>
       ) : (
         <ul className="item-list">
           {reserved.map((listing) => (
@@ -493,7 +582,7 @@ function NgoList({ donations, setDonations }) {
       <h2>Donations for pickup</h2>
       <p className="lede">These batches are for animal feed, not human consumption.</p>
       {open.length === 0 ? (
-        <p className="note">No donations yet. Switch to Restaurant and donate cooked food.</p>
+        <p className="empty">No donations yet. Switch to Restaurant and donate cooked food.</p>
       ) : (
         <ul className="item-list">
           {open.map((donation) => (
@@ -518,7 +607,7 @@ function NgoList({ donations, setDonations }) {
       <h2 className="section-gap">My pickups</h2>
       <p className="lede">Batches you claimed. Collect them in the ready window.</p>
       {claimed.length === 0 ? (
-        <p className="note">No pickups yet. Claim a donation above.</p>
+        <p className="empty">No pickups yet. Claim a donation above.</p>
       ) : (
         <ul className="item-list">
           {claimed.map((donation) => (
