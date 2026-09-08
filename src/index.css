@@ -241,3 +241,11 @@ s {
 .section-gap {
   margin-top: 32px;
 }
+
+.insight {
+  background: #e7eee9;
+}
+
+.insight .item-top span {
+  color: #265044;
+}

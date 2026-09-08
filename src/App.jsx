@@ -25,10 +25,10 @@ function dateFromToday(days) {
 }
 
 const startingItems = [
-  { id: '1', name: 'Baby spinach', quantity: 7, unit: 'kg', expiry: dateFromToday(1), status: 'in-stock' },
-  { id: '2', name: 'Roma tomatoes', quantity: 18, unit: 'kg', expiry: dateFromToday(4), status: 'in-stock' },
-  { id: '3', name: 'Brioche buns', quantity: 14, unit: 'pcs', expiry: dateFromToday(2), status: 'in-stock' },
-  { id: '4', name: 'Cooked herb chicken', quantity: 9, unit: 'portions', expiry: dateFromToday(0), status: 'in-stock' },
+  { id: '1', name: 'Baby spinach', quantity: 7, unit: 'kg', expiry: dateFromToday(1), status: 'in-stock', lastOrder: 12, avgWastePct: 0.25 },
+  { id: '2', name: 'Roma tomatoes', quantity: 18, unit: 'kg', expiry: dateFromToday(4), status: 'in-stock', lastOrder: 100, avgWastePct: 0.2 },
+  { id: '3', name: 'Brioche buns', quantity: 14, unit: 'pcs', expiry: dateFromToday(2), status: 'in-stock', lastOrder: 24, avgWastePct: 0.18 },
+  { id: '4', name: 'Cooked herb chicken', quantity: 9, unit: 'portions', expiry: dateFromToday(0), status: 'in-stock', lastOrder: 18, avgWastePct: 0.34 },
 ]
 
 function daysLeft(expiry) {
@@ -47,6 +47,18 @@ function freshness(item) {
   if (days === 0) return { label: 'Expires today', tone: 'urgent' }
   if (days <= 3) return { label: `${days} day${days === 1 ? '' : 's'} left`, tone: 'soon' }
   return { label: `${days} days left`, tone: 'ok' }
+}
+
+function suggestedOrder(item) {
+  if (!item.lastOrder || !item.avgWastePct) return null
+  return Math.max(0, Math.round(item.lastOrder * (1 - item.avgWastePct + 0.05)))
+}
+
+function closeCycle(item) {
+  const lastOrder = item.lastOrder || item.quantity
+  const thisWaste = lastOrder ? item.quantity / lastOrder : 0
+  const avgWastePct = item.avgWastePct ? (item.avgWastePct + thisWaste) / 2 : thisWaste
+  return { ...item, avgWastePct, suggestionDecision: undefined }
 }
 
 export default function App() {
@@ -134,6 +146,8 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         unit: form.unit.trim() || 'kg',
         expiry: form.expiry,
         status: 'in-stock',
+        lastOrder: quantity,
+        avgWastePct: 0,
       },
       ...items,
     ])
@@ -141,7 +155,15 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
   }
 
   function markItem(id, status) {
-    setItems(items.map((item) => (item.id === id ? { ...item, status } : item)))
+    setItems(
+      items.map((item) => {
+        if (item.id !== id) return item
+        if (status === 'listed' || status === 'donated') {
+          return { ...closeCycle(item), status }
+        }
+        return { ...item, status }
+      }),
+    )
   }
 
   function listForBuyers() {
@@ -216,6 +238,8 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
           )
         })}
       </ul>
+
+      <OrderSuggestions items={items} setItems={setItems} />
 
       {actionItem ? (
         <div className="add-form">
@@ -303,6 +327,84 @@ function RestaurantInventory({ items, setItems, listings, setListings, donations
         </button>
       </form>
     </section>
+  )
+}
+
+function OrderSuggestions({ items, setItems }) {
+  const pending = items.filter((item) => suggestedOrder(item) !== null && !item.suggestionDecision)
+
+  function decide(id, decision, ownAmount) {
+    setItems(
+      items.map((item) =>
+        item.id === id
+          ? { ...item, suggestionDecision: decision, ownOrder: ownAmount }
+          : item,
+      ),
+    )
+  }
+
+  return (
+    <div className="suggestions">
+      <h2 className="section-gap">Next order suggestions</h2>
+      <p className="lede">
+        Based on what you usually waste, plus a small safety buffer. The app never places
+        an order for you.
+      </p>
+      {pending.length === 0 ? (
+        <p className="note">No pending suggestions. Log a few cycles and they will show up here.</p>
+      ) : (
+        <ul className="item-list">
+          {pending.map((item) => (
+            <SuggestionCard key={item.id} item={item} onDecide={decide} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function SuggestionCard({ item, onDecide }) {
+  const amount = suggestedOrder(item)
+  const [own, setOwn] = useState(String(amount))
+  const wastePct = Math.round(item.avgWastePct * 100)
+  const change = Math.round((1 - amount / item.lastOrder) * 100)
+
+  return (
+    <li className="item-card insight">
+      <div className="item-top">
+        <div>
+          <strong>{item.name}</strong>
+          <span>
+            Last order {item.lastOrder} {item.unit} · about {wastePct}% wasted
+          </span>
+          <span>
+            Suggested next order: {amount} {item.unit} ({change >= 0 ? '↓' : '↑'}
+            {Math.abs(change)}% vs last, with 5% buffer)
+          </span>
+        </div>
+      </div>
+      <div className="form-row">
+        <label>
+          Or type your own amount
+          <input value={own} onChange={(event) => setOwn(event.target.value)} type="number" min="0" />
+        </label>
+      </div>
+      <div className="action-row">
+        <button className="back" type="button" onClick={() => onDecide(item.id, 'accepted')}>
+          Use {amount} {item.unit}
+        </button>
+        <button
+          className="secondary"
+          type="button"
+          onClick={() => onDecide(item.id, 'overridden', Number(own) || amount)}
+        >
+          Use my amount
+        </button>
+        <button className="text-btn" type="button" onClick={() => onDecide(item.id, 'ignored')}>
+          Ignore
+        </button>
+      </div>
+    </li>
   )
 }
 
