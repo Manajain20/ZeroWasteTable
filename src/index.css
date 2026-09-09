@@ -75,7 +75,7 @@ p {
 
 .highlights {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin: 22px 0 0;
   padding: 0;
@@ -173,6 +173,10 @@ p {
 
 .role-ngo .role-icon {
   background: #f8d7d3;
+}
+
+.role-compost .role-icon {
+  background: #e4d7c3;
 }
 
 .role-card strong {
@@ -455,6 +459,11 @@ s {
 .item-card .back {
   margin-top: 0;
   justify-self: start;
+}
+
+.item-card .back:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .section-gap {
